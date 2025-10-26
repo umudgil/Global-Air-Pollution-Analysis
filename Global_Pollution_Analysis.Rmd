@@ -1,0 +1,270 @@
+---
+title: "Global Air Pollution Data Analysis"
+author: "Udbhaav Mudgil"
+date: "2025-10-22"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(ggplot2)
+library(dplyr)
+library(readr)
+library(scales)
+library(sf)
+library(rnaturalearth)
+library(rnaturalearthdata)
+```
+--- 
+
+## Introduction
+
+This report provides an exploratory analysis of a **global air pollution dataset**.  
+We will use R to examine trends in Air Quality Index (AQI) across countries and regions, visualize relationships between pollutants and AQI, and generate a world map displaying average AQI by country.
+
+The analysis uses several R libraries such as **tidyverse**, **ggplot2**, **sf**, and **rnaturalearth** for data manipulation, visualization, and geospatial mapping.
+
+
+## Load and Inspect the Dataset
+
+We start by loading the cleaned global air pollution dataset using `read_csv()`.  
+Next, we explore its structure, summary statistics, and check for missing values to understand data quality.
+
+```{r data-inspection}
+pollution <- read_csv("global_air_pollution_dataset_cleaned.csv")
+
+glimpse(pollution)
+
+summary(pollution)
+
+colSums(is.na(pollution))
+```
+
+## Data Preprocessing
+
+We will start data preprocessing with converting Region, Country, City, and AQI Category to factors as this ensures that R treats them as categorical variables, which is essential for grouping operations, summaries, and color-coded plots. This step also helps to avoid errors in aggregation functions that require proper factor levels for grouping.
+```{r}
+pollution <- pollution %>%
+mutate(
+Region = as.factor(Region),
+Country = as.factor(Country),
+City = as.factor(City),
+`AQI Category` = as.factor(`AQI Category`)
+)
+```
+
+## Exploratory Analysis
+
+### Average AQI by Country
+
+We calculate the average AQI for each country by using `group_by()` and `summarise()` functions. This provides a high-level view of air quality at the national level and allows comparisons across countries.  
+
+**Key Insights:**
+
+- Countries like Bahrain and Pakistan have the highest average AQI.  
+- Countries, such as New Zealand and Australia, have low average AQI.
+
+```{r}
+aqi_country <- pollution %>%
+group_by(Country) %>%
+summarise(Avg_AQI = mean(`AQI Value`, na.rm = TRUE))
+print(aqi_country)
+```
+
+### Average AQI by Region
+
+Aggregating AQI by region helps identify which geographic areas experience the worst air quality. Sorting by descending average AQI highlights the most affected regions.  
+
+**Key Insights:**
+
+- Asia and Africa have the highest regional AQI averages.  
+- South America and Oceania have significantly lower average AQI, indicating cleaner air.  
+```{r}
+mean_aqi_region <- pollution %>%
+group_by(Region) %>%
+summarise(Avg_AQI = mean(`AQI Value`, na.rm = TRUE)) %>%
+arrange(desc(Avg_AQI))
+print(mean_aqi_region)
+```
+
+### Top 15 Most Polluted Cities
+
+We sort cities by their AQI values to identify urban pollution hotspots. This helps pinpoint specific cities that may need urgent intervention.  
+
+**Key Insights:**
+
+- Most top polluted cities are in India.  
+- Urban density, industrial activity, and traffic contribute significantly to high AQI.
+```{r}
+top15_cities <- pollution %>%
+arrange(desc(`AQI Value`)) %>%
+select(Country, City, `AQI Value`, `AQI Category`) %>%
+head(15)
+print(top15_cities)
+```
+
+---
+
+## Visualizations
+
+### Average AQI by Region
+
+We will use a bar chart to visualize average AQI by region. Reordering bars by descending AQI makes it easier to compare regions visually.  
+
+**Key Insights:**
+
+- Asia shows the highest average AQI, followed by Africa.  
+- Oceania and South America appear cleaner in comparison.  
+
+```{r}
+ggplot(mean_aqi_region, aes(x = reorder(Region, -Avg_AQI), y = Avg_AQI, fill = Region)) +
+geom_col(show.legend = FALSE) +
+labs(
+title = "Average AQI by Region",
+x = "Region",
+y = "Mean AQI Value"
+) +
+theme_minimal()
+```
+
+### Relationship between PM2.5 and Overall AQI
+
+We will use a scatter plot to examine the relationship between PM2.5 AQI values and overall AQI. Points are colored by AQI category to highlight pollution severity.  
+
+**Key Insights:**
+
+- PM2.5 strongly correlates with overall AQI.  
+- Cities with higher PM2.5 are often in the "Hazardous" or "Very Unhealthy" AQI categories.  
+
+```{r}
+ggplot(pollution, aes(x = `PM2.5 AQI Value`, y = `AQI Value`, color = `AQI Category`)) +
+geom_point(alpha = 0.5) +
+labs(
+title = "Relationship between PM2.5 and Overall AQI Value",
+x = "PM2.5 AQI Value",
+y = "Overall AQI Value"
+) +
+theme_minimal()
+```
+
+### AQI Distribution by Region
+
+We will use boxplots show median, quartiles, and outliers for AQI within each region, providing insights into variability and extreme values in each region.  
+
+**Key Insights:**
+
+- Asia and Africa have both high medians whereas Africa and North America have large variability in AQI.
+- Apart from South America and Ocenia all other regions have at least 1 city with 500 AQI.
+- Europe and Oceania show tighter distributions with lower median AQI.  
+
+```{r}
+ggplot(pollution, aes(x = Region, y = `AQI Value`, fill = Region)) +
+geom_boxplot(show.legend = FALSE, alpha = 0.5) +
+labs(
+title = "AQI Distribution by Region",
+x = "Region",
+y = "AQI Value"
+) +
+theme_minimal() +
+theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+### Number of Cities per AQI Category
+
+This bar chart shows how many cities fall into each AQI category, indicating global exposure to different pollution levels.  
+
+**Key Insights:**
+
+- Most cities fall into Good or Moderate for Sensitive Groups categories.  
+- Few cities are in "Very Unhealthy" or "Hazardous" extremes.  
+
+```{r}
+pollution %>%
+group_by(`AQI Category`) %>%
+summarise(City_Count = n_distinct(City)) %>%
+ggplot(aes(x = `AQI Category`, y = City_Count, fill = `AQI Category`)) +
+geom_col(show.legend = FALSE) +
+labs(
+title = "Number of Cities per AQI Category",
+x = "AQI Category",
+y = "Number of Cities"
+) +
+theme_minimal() +
+theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## Global Air Pollution Map
+
+### Load World Map Data
+
+We load country boundary data using `rnaturalearth` to create a base map for plotting AQI values geographically.  
+
+```{r}
+world <- ne_countries(scale = "medium", returnclass = "sf")
+```
+
+### Harmonize Country Names
+
+We use mutate function to convert country names in AQI dataset so that they align with the map data to ensure correct merging and avoid missing matches.  
+
+```{r}
+aqi_country <- aqi_country %>%
+mutate(Country = case_when(
+Country == "Bolivia (Plurinational State of)" ~ "Bolivia",
+Country == "Bosnia and Herzegovina" ~ "Bosnia and Herz.",
+Country == "Central African Republic" ~ "Central African Rep.",
+Country == "Democratic Republic of the Congo" ~ "Dem. Rep. Congo",
+Country == "Dominican Republic" ~ "Dominican Rep.",
+Country == "Equatorial Guinea" ~ "Eq. Guinea",
+Country == "Iran (Islamic Republic of)" ~ "Iran",
+Country == "Kingdom of Eswatini" ~ "eSwatini",
+Country == "Lao People's Democratic Republic" ~ "Laos",
+Country == "Republic of Korea" ~ "South Korea",
+Country == "Republic of Moldova" ~ "Moldova",
+Country == "Republic of North Macedonia" ~ "North Macedonia",
+Country == "Russian Federation" ~ "Russia",
+Country == "Saint Kitts and Nevis" ~ "St. Kitts and Nevis",
+Country == "Solomon Islands" ~ "Solomon Is.",
+Country == "South Sudan" ~ "S. Sudan",
+Country == "Syrian Arab Republic" ~ "Syria",
+Country == "United Kingdom of Great Britain and Northern Ireland" ~ "United Kingdom",
+Country == "United Republic of Tanzania" ~ "Tanzania",
+Country == "Venezuela (Bolivarian Republic of)" ~ "Venezuela",
+TRUE ~ Country
+))
+```
+
+### Merge AQI Data with Map
+
+Merging AQI data with map polygons allows us to create a choropleth map showing global air pollution.  
+
+```{r}
+world_aqi <- left_join(world, aqi_country, by = c("name" = "Country"))
+```
+
+### Plot World Map of Average AQI
+
+We generate a choropleth map by using `geom_sf()` function, with color gradients representing average AQI levels. Darker reds indicate higher pollution, while light blues indicate cleaner air.  
+
+**Key Insights:**
+
+- South Asia, the Middle East, and parts of Africa show the worst air quality.  
+- North America, South America, Oceania, and parts of Europe have relatively cleaner air.
+
+```{r}
+ggplot(data = world_aqi) +
+geom_sf(aes(fill = Avg_AQI), color = "white", size = 0.1) +
+scale_fill_gradient(
+name = "Average AQI",
+low = "lightblue",
+high = "red",
+na.value = "grey90"
+) +
+labs(
+title = "Average Air Quality Index (AQI) by Country",
+subtitle = "Darker red indicates higher pollution levels",
+caption = "Source: Global Air Pollution Dataset"
+) +
+theme_minimal()
+```
